@@ -8,32 +8,79 @@ import requests
 import json
 import time
 from typing import Dict, Optional, List
-import paho.mqtt.client as mqtt
 from datetime import datetime
 
 
 class TraegerClient:
     """Client for interacting with Traeger grills via their API."""
     
-    def __init__(self, auth_token: str):
+    def __init__(self, auth_token: str = None):
         """
         Initialize the Traeger client.
         
         Args:
-            auth_token: JWT token from AWS Cognito (extract from mitmproxy flows)
+            auth_token: JWT token from AWS Cognito (optional if using login())
         """
         self.auth_token = auth_token
         self.base_url = "https://mobile-iot-api.iot.traegergrills.io"
         self.graphql_url = "https://api.kube-gql.prod.traegergrills.io/"
+        self.cognito_url = "https://cognito-idp.us-west-2.amazonaws.com/"
+        self.client_id = "2fuohjtqv1e63dkc22pp1j52po"  # Traeger app client ID
         self.headers = {
-            "authorization": auth_token,
+            "authorization": auth_token if auth_token else "",
             "content-type": "application/json",
             "accept": "*/*",
             "user-agent": "Traeger/1933 CFNetwork/3860.100.1"
         }
         self.grill_id = None
         self.grill_status = {}
-        self.mqtt_client = None
+    
+    def login(self, email: str, password: str) -> bool:
+        """
+        Login with email and password using AWS Cognito.
+        
+        Args:
+            email: Traeger account email
+            password: Traeger account password
+            
+        Returns:
+            True if login successful, False otherwise
+        """
+        try:
+            # AWS Cognito InitiateAuth request
+            headers = {
+                "Content-Type": "application/x-amz-json-1.1",
+                "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
+            }
+            
+            payload = {
+                "ClientId": self.client_id,
+                "AuthFlow": "USER_PASSWORD_AUTH",
+                "AuthParameters": {
+                    "USERNAME": email,
+                    "PASSWORD": password
+                }
+            }
+            
+            response = requests.post(
+                self.cognito_url,
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'AuthenticationResult' in result:
+                    # Get the ID token (JWT)
+                    self.auth_token = result['AuthenticationResult']['IdToken']
+                    self.headers['authorization'] = self.auth_token
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Login error: {e}")
+            return False
         
     def get_grills(self) -> List[Dict]:
         """Get list of grills associated with this account."""
@@ -121,11 +168,67 @@ class TraegerClient:
         print(f"Clearing probe {probe_id} alarm...")
         return self.send_command(command)
     
-    def request_status(self) -> Dict:
-        """Request current grill status."""
+    def request_status(self, parse: bool = True) -> Dict:
+        """
+        Request current grill status.
+        
+        Args:
+            parse: Whether to parse the status response (default: True)
+            
+        Returns:
+            Status data (parsed if parse=True, raw otherwise)
+        """
         # Command "113" appears to request status
-        print("Requesting grill status...")
-        return self.send_command("113")
+        response = self.send_command("113")
+        
+        if parse:
+            return self.parse_status(response)
+        return response
+    
+    def parse_status(self, status_response: Dict) -> Dict:
+        """
+        Parse status response to extract temperature and state data.
+        
+        The status response format needs to be determined from actual grill responses.
+        This is a placeholder implementation that attempts to handle common formats.
+        
+        Args:
+            status_response: Raw status response from the grill
+            
+        Returns:
+            Parsed status dictionary with temperatures and state
+        """
+        parsed = {
+            'grill_temp': None,
+            'set_temp': None,
+            'probe0_temp': None,
+            'probe1_temp': None,
+            'probe2_temp': None,
+            'probe3_temp': None,
+            'status': 'unknown',
+            'raw': status_response
+        }
+        
+        # Try to parse different response formats
+        # TODO: Update this based on actual status response format from your grill
+        
+        # Common fields that might be in the response
+        if isinstance(status_response, dict):
+            # Check for direct temperature fields
+            parsed['grill_temp'] = status_response.get('grill_temp') or status_response.get('grillTemp')
+            parsed['set_temp'] = status_response.get('set_temp') or status_response.get('setTemp')
+            
+            # Check for probe temperatures
+            for i in range(4):
+                # Try various field name patterns
+                probe_key = f'probe{i}_temp'
+                alt_key = f'probe{i}Temp'
+                parsed[probe_key] = status_response.get(probe_key) or status_response.get(alt_key)
+            
+            # Check for status/state field
+            parsed['status'] = status_response.get('status') or status_response.get('state', 'unknown')
+        
+        return parsed
     
     def turn_on(self) -> Dict:
         """Turn the grill on."""
@@ -136,6 +239,23 @@ class TraegerClient:
         """Turn the grill off."""
         print("Turning grill off...")
         return self.send_command("90,0")
+    
+    def get_status_from_api(self) -> Dict:
+        """
+        Get current grill status from the REST API (alternative to MQTT).
+        
+        Returns:
+            Current grill status
+        """
+        if not self.grill_id:
+            raise ValueError("No grill ID set. Call set_grill() first.")
+        
+        response = requests.get(
+            f"{self.base_url}/things/{self.grill_id}",
+            headers=self.headers
+        )
+        response.raise_for_status()
+        return response.json()
     
     def get_mqtt_connection(self) -> Dict:
         """Get MQTT WebSocket connection details for real-time updates."""

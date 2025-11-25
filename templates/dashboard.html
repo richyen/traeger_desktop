@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traeger Temperature Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+            position: relative;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-card.controllable {
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        
+        .stat-card.controllable:hover {
+            border-color: #667eea;
+        }
+        
+        .control-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 0.75em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .control-btn:hover {
+            background: #5568d3;
+        }
+        
+        .stat-label {
+            font-size: 0.85em;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-unit {
+            font-size: 0.5em;
+            color: #999;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        
+        .chart-container h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        canvas {
+            max-width: 100%;
+            height: 400px !important;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.active {
+            background: #10b981;
+        }
+        
+        .status-indicator.inactive {
+            background: #ef4444;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        
+        .last-update {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        
+        .modal-content h3 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 1.1em;
+            box-sizing: border-box;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #666;
+        }
+        
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .toast.show {
+            display: flex;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
+        
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔥 Traeger Temperature Monitor</h1>
+            <p><span class="status-indicator active" id="statusIndicator"></span>Live Monitoring</p>
+        </header>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Grill Temperature</div>
+                <div class="stat-value" id="grillTemp">--<span class="stat-unit">°F</span></div>
+            </div>
+            <div class="stat-card controllable" onclick="openSetTempModal()">
+                <button class="control-btn">Set</button>
+                <div class="stat-label">Target Temperature</div>
+                <div class="stat-value" id="setTemp">--<span class="stat-unit">°F</span></div>
+            </div>
+            <div class="stat-card controllable" onclick="openProbeModal(0)">
+                <button class="control-btn">Set</button>
+                <div class="stat-label">Probe 1 Target</div>
+                <div class="stat-value" id="probe1Temp">--<span class="stat-unit">°F</span></div>
+            </div>
+            <div class="stat-card controllable" onclick="openProbeModal(1)">
+                <button class="control-btn">Set</button>
+                <div class="stat-label">Probe 2 Target</div>
+                <div class="stat-value" id="probe2Temp">--<span class="stat-unit">°F</span></div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <h2>📊 Temperature History (Last 2 Hours)</h2>
+            <canvas id="tempChart"></canvas>
+        </div>
+        
+        <div class="last-update">
+            Last updated: <span id="lastUpdate">--</span>
+        </div>
+    </div>
+    
+    <!-- Set Grill Temperature Modal -->
+    <div id="tempModal" class="modal">
+        <div class="modal-content">
+            <h3>Set Grill Temperature</h3>
+            <div class="input-group">
+                <label for="grillTempInput">Target Temperature (165-500°F)</label>
+                <input type="number" id="grillTempInput" min="165" max="500" step="5" placeholder="225">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="setGrillTemp()">Set Temperature</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Set Probe Target Modal -->
+    <div id="probeModal" class="modal">
+        <div class="modal-content">
+            <h3>Set Probe <span id="probeNumber">1</span> Target</h3>
+            <div class="input-group">
+                <label for="probeTempInput">Target Temperature (0-500°F, 0 to clear)</label>
+                <input type="number" id="probeTempInput" min="0" max="500" step="5" placeholder="165">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="setProbeTemp()">Set Target</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <span id="toastMessage"></span>
+    </div>
+    
+    <script>
+        // Initialize chart
+        const ctx = document.getElementById('tempChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Grill Temp',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Probe 1',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Probe 2',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Target',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        tension: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Temperature (°F)'
+                        },
+                        beginAtZero: false
+                    }
+                }
+            }
+        });
+        
+        // Update current temps
+        function updateCurrent() {
+            fetch('/api/current')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.timestamp) {
+                        document.getElementById('grillTemp').innerHTML = 
+                            (data.grill_temp || '--') + '<span class="stat-unit">°F</span>';
+                        document.getElementById('probe1Temp').innerHTML = 
+                            (data.probe1_temp || '--') + '<span class="stat-unit">°F</span>';
+                        document.getElementById('probe2Temp').innerHTML = 
+                            (data.probe2_temp || '--') + '<span class="stat-unit">°F</span>';
+                        document.getElementById('setTemp').innerHTML = 
+                            (data.set_temp || '--') + '<span class="stat-unit">°F</span>';
+                        
+                        const date = new Date(data.timestamp);
+                        document.getElementById('lastUpdate').textContent = date.toLocaleString();
+                        
+                        document.getElementById('statusIndicator').className = 'status-indicator active';
+                    } else {
+                        document.getElementById('statusIndicator').className = 'status-indicator inactive';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching current temps:', error);
+                    document.getElementById('statusIndicator').className = 'status-indicator inactive';
+                });
+        }
+        
+        // Update chart
+        function updateChart() {
+            fetch('/api/recent?hours=2')
+                .then(response => response.json())
+                .then(data => {
+                    // Format timestamps for display
+                    const labels = data.timestamps.map(ts => {
+                        const date = new Date(ts);
+                        return date.toLocaleTimeString();
+                    });
+                    
+                    chart.data.labels = labels;
+                    chart.data.datasets[0].data = data.grill_temps;
+                    chart.data.datasets[1].data = data.probe1_temps;
+                    chart.data.datasets[2].data = data.probe2_temps;
+                    chart.data.datasets[3].data = data.set_temps;
+                    chart.update('none'); // Update without animation for smoother updates
+                })
+                .catch(error => console.error('Error fetching chart data:', error));
+        }
+        
+        // Initial load
+        updateCurrent();
+        updateChart();
+        
+        // Update every 10 seconds
+        setInterval(updateCurrent, 10000);
+        setInterval(updateChart, 30000);
+        
+        // Modal functions
+        let currentProbeId = 0;
+        
+        function openSetTempModal() {
+            document.getElementById('tempModal').classList.add('active');
+            document.getElementById('grillTempInput').focus();
+        }
+        
+        function openProbeModal(probeId) {
+            currentProbeId = probeId;
+            document.getElementById('probeNumber').textContent = probeId + 1;
+            document.getElementById('probeModal').classList.add('active');
+            document.getElementById('probeTempInput').focus();
+        }
+        
+        function closeModal() {
+            document.getElementById('tempModal').classList.remove('active');
+            document.getElementById('probeModal').classList.remove('active');
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            
+            toastMessage.textContent = message;
+            toast.className = `toast show ${type}`;
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+        
+        function setGrillTemp() {
+            const temp = parseInt(document.getElementById('grillTempInput').value);
+            
+            if (!temp || temp < 165 || temp > 500) {
+                showToast('Temperature must be between 165-500°F', 'error');
+                return;
+            }
+            
+            fetch('/api/control/grill-temp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ temperature: temp })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(`Grill temperature set to ${temp}°F`, 'success');
+                    closeModal();
+                    document.getElementById('grillTempInput').value = '';
+                    // Update display immediately
+                    setTimeout(updateCurrent, 1000);
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showToast(`Failed to set temperature: ${error}`, 'error');
+            });
+        }
+        
+        function setProbeTemp() {
+            const temp = parseInt(document.getElementById('probeTempInput').value);
+            
+            if (temp === null || temp < 0 || temp > 500) {
+                showToast('Temperature must be between 0-500°F', 'error');
+                return;
+            }
+            
+            fetch('/api/control/probe-target', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    probe_id: currentProbeId,
+                    temperature: temp 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const action = temp === 0 ? 'cleared' : `set to ${temp}°F`;
+                    showToast(`Probe ${currentProbeId + 1} target ${action}`, 'success');
+                    closeModal();
+                    document.getElementById('probeTempInput').value = '';
+                    // Update display immediately
+                    setTimeout(updateCurrent, 1000);
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showToast(`Failed to set probe target: ${error}`, 'error');
+            });
+        }
+        
+        // Close modal on escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
+            }
+        });
+        
+        // Close modal on background click
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

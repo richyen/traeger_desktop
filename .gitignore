@@ -10,6 +10,14 @@ ENV/
 
 # Sensitive data - NEVER commit these!
 traeger_config.json
+.env
+
+# Database
+*.db
+*.sqlite
+
+# Docker
+.docker/
 
 # Local development - flow captures and analysis
 flows/
@@ -27,3 +35,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Backups
+*.old.md

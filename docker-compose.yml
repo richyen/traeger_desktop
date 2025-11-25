@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  monitor:
+    build: .
+    container_name: traeger-monitor
+    command: python monitor.py
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/traeger.db
+      - POLL_INTERVAL=30
+    volumes:
+      - traeger-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - app
+
+  app:
+    build: .
+    container_name: traeger-web
+    command: python app.py
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/traeger.db
+    ports:
+      - "5005:5000"
+    volumes:
+      - traeger-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  traeger-data:
+    driver: local
