@@ -19,25 +19,26 @@ class TraegerClient:
         Initialize the Traeger client.
         
         Args:
-            auth_token: JWT token from AWS Cognito (optional if using login())
+            auth_token: JWT token (idToken) from Traeger auth (optional if using login())
         """
         self.auth_token = auth_token
+        self.access_token = None
+        self.refresh_token = None
         self.base_url = "https://mobile-iot-api.iot.traegergrills.io"
         self.graphql_url = "https://api.kube-gql.prod.traegergrills.io/"
-        self.cognito_url = "https://cognito-idp.us-west-2.amazonaws.com/"
-        self.client_id = "2fuohjtqv1e63dkc22pp1j52po"  # Traeger app client ID
+        self.auth_url = "https://auth-api.iot.traegergrills.io"
         self.headers = {
             "authorization": auth_token if auth_token else "",
             "content-type": "application/json",
             "accept": "*/*",
-            "user-agent": "Traeger/1933 CFNetwork/3860.100.1"
+            "user-agent": "Platform: iOS, OS Version: 26.0, App Version: 3.12.0, Device Model: iPhone"
         }
         self.grill_id = None
         self.grill_status = {}
     
     def login(self, email: str, password: str) -> bool:
         """
-        Login with email and password using AWS Cognito.
+        Login with email and password using Traeger's auth API.
         
         Args:
             email: Traeger account email
@@ -47,36 +48,38 @@ class TraegerClient:
             True if login successful, False otherwise
         """
         try:
-            # AWS Cognito InitiateAuth request
+            # Use Traeger's auth API endpoint
             headers = {
-                "Content-Type": "application/x-amz-json-1.1",
-                "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
+                "Content-Type": "application/json",
+                "Accept": "*/*",
+                "User-Agent": "Platform: iOS, OS Version: 26.0, App Version: 3.12.0, Device Model: iPhone",
+                "content-language": "en"
             }
             
             payload = {
-                "ClientId": self.client_id,
-                "AuthFlow": "USER_PASSWORD_AUTH",
-                "AuthParameters": {
-                    "USERNAME": email,
-                    "PASSWORD": password
-                }
+                "username": email,
+                "password": password
             }
             
             response = requests.post(
-                self.cognito_url,
+                f"{self.auth_url}/tokens",
                 headers=headers,
                 json=payload
             )
             
             if response.status_code == 200:
                 result = response.json()
-                if 'AuthenticationResult' in result:
-                    # Get the ID token (JWT)
-                    self.auth_token = result['AuthenticationResult']['IdToken']
-                    self.headers['authorization'] = self.auth_token
-                    return True
-            
-            return False
+                # Extract tokens from response
+                self.auth_token = result.get('idToken')  # Used for authorization
+                self.access_token = result.get('accessToken')
+                self.refresh_token = result.get('refreshToken')
+                
+                # Update headers with the idToken for API calls
+                self.headers['authorization'] = self.auth_token
+                return True
+            else:
+                print(f"Login failed: {response.status_code} - {response.text}")
+                return False
             
         except Exception as e:
             print(f"Login error: {e}")

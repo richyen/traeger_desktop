@@ -9,7 +9,9 @@ services:
       - .env
     environment:
       - DB_PATH=/app/data/traeger.db
-      - POLL_INTERVAL=30
+      - POLL_INTERVAL=${POLL_INTERVAL:-30}
+      - TRAEGER_EMAIL=${TRAEGER_EMAIL}
+      - TRAEGER_PASSWORD=${TRAEGER_PASSWORD}
     volumes:
       - traeger-data:/app/data
     restart: unless-stopped
@@ -24,6 +26,8 @@ services:
       - .env
     environment:
       - DB_PATH=/app/data/traeger.db
+      - TRAEGER_EMAIL=${TRAEGER_EMAIL}
+      - TRAEGER_PASSWORD=${TRAEGER_PASSWORD}
     ports:
       - "5005:5000"
     volumes:

@@ -9,104 +9,84 @@ A web-based temperature monitoring dashboard for Traeger WiFIRE grills with hist
 - 🎨 **Beautiful web dashboard** - Clean, responsive interface
 - 🐳 **Docker-based** - Simple `docker-compose up` and you're running
 - 💾 **Persistent storage** - All cook data saved to SQLite database
-- 🔐 **Auto-login** - Store credentials in `.env` file
+- 🔐 **Simple auth** - Just provide your Traeger email and password
 
 ## Quick Start
 
-### 1. Clone and Setup
-
 ```bash
+# 1. Clone the repo
 git clone https://github.com/richyen/traeger_desktop.git
 cd traeger_desktop
-```
 
-### 2. Configure Authentication
-
-Copy the example environment file:
-
-```bash
+# 2. Create config file
 cp .env.example .env
+
+# 3. Edit .env with your Traeger email and password
+nano .env
+
+# 4. Start it up!
+docker compose up -d
 ```
 
-**Option A: Email/Password (Recommended)**
+**Dashboard URL**: http://localhost:5005
 
-Edit `.env` with your Traeger account credentials:
+That's it! The app will automatically authenticate and start monitoring your grill.
+
+
+## Configuration
+
+Edit `.env` to customize settings:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `TRAEGER_EMAIL` | ✅ Yes | - | Your Traeger account email |
+| `TRAEGER_PASSWORD` | ✅ Yes | - | Your Traeger account password |
+| `DB_PATH` | No | `/app/data/traeger.db` | Database location |
+| `POLL_INTERVAL` | No | `30` | Seconds between temperature polls |
+
+## Common Commands
 
 ```bash
-TRAEGER_EMAIL=your.email@example.com
-TRAEGER_PASSWORD=your_password
-```
+# View logs
+docker compose logs -f monitor   # Temperature monitoring
+docker compose logs -f app       # Web dashboard
 
-**Option B: Token (Advanced)**
+# Stop and restart
+docker compose down
+docker compose up -d
 
-If you have an auth token from `traeger_config.json`:
-
-```bash
-TRAEGER_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-### 3. Start the Dashboard
-
-```bash
-docker-compose up -d
-```
-
-That's it! Open your browser to:
-
-**http://localhost:5000**
-
-## Usage
-
-### Start Monitoring
-```bash
-docker-compose up -d
-```
-
-### View Logs
-```bash
-docker-compose logs -f
-```
-
-### Stop Monitoring
-```bash
-docker-compose down
-```
-
-### Reset All Data (Fresh Start)
-```bash
-docker-compose down -v
+# Complete cleanup (removes database too!)
+docker compose down -v
 ```
 
 ## How It Works
 
-1. **Automatic Login** - Uses credentials from `.env` to authenticate with Traeger
-2. **Continuous Monitoring** - Polls your grill every 30 seconds
-3. **Data Storage** - Saves all readings to SQLite database in Docker volume
-4. **Web Dashboard** - Flask app serves real-time and historical data
-5. **Auto-Restart** - If connection drops, automatically reconnects
+The application automatically handles authentication using Traeger's official API:
 
-## Web Interface
+1. **Login**: Authenticates with Traeger's auth API using your credentials
+2. **Token Management**: Automatically obtains and manages JWT tokens
+3. **Monitoring**: Polls your grill every 30 seconds
+4. **Storage**: Saves all temperature readings to SQLite database
+5. **Dashboard**: Flask web app displays real-time and historical data
 
-The dashboard shows:
-- **Current temperatures** - Real-time grill and probe temps
-- **Live graph** - Last 2 hours of data, auto-updating
-- **Historical view** - All past cooks with date filters
-- **Cook statistics** - Duration, min/max/avg temps per cook session
+No manual token extraction needed - just provide your email and password!
 
 ## Troubleshooting
 
-### "Authentication failed"
-- Check your email/password in `.env`
-- Ensure you can log into the Traeger app
+### Authentication Failed
+- Verify your email and password in `.env` are correct
+- Test that you can log into the Traeger mobile app
+- Check logs: `docker compose logs monitor`
 
-### "No grill found"
-- Verify your grill is powered on
-- Check WiFi connection on the grill
+### No Grills Found
+- Make sure your grill is registered in the Traeger app
+- Verify your grill is connected to WiFi
+- Check that it appears in the mobile app
 
-### Dashboard not loading
-```bash
-docker-compose logs app
-```
+### Dashboard Not Loading
+- Check services are running: `docker compose ps`
+- Try http://localhost:5005 or http://127.0.0.1:5005
+- View logs: `docker compose logs app`
 
 ## Backup Your Data
 
