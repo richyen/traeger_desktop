@@ -134,8 +134,8 @@ class TraegerClient:
         Returns:
             Response from the API
         """
-        # Command format: "112,<temp>"
-        command = f"112,{temp_fahrenheit}"
+        # Command format: "11,<temp>" (per reverse-engineered Traeger iOS app)
+        command = f"11,{temp_fahrenheit}"
         print(f"Setting grill temperature to {temp_fahrenheit}°F...")
         return self.send_command(command)
     
@@ -144,16 +144,17 @@ class TraegerClient:
         Set a probe temperature alarm.
         
         Args:
-            probe_id: Probe number (0-3 for probes p0-p3)
+            probe_id: Probe number (0-3 for probes p0-p3) -- kept for API
+                compatibility; the underlying Traeger firmware only exposes a
+                single probe target via command 14.
             target_temp: Target temperature in Fahrenheit
             
         Returns:
             Response from the API
         """
-        # Command format: "120,10,p<probe_id>,<temp>"
-        # The "10" appears to be a fixed parameter
-        command = f"120,10,p{probe_id},{target_temp}"
-        print(f"Setting probe {probe_id} alarm to {target_temp}°F...")
+        # Command format: "14,<temp>" (per reverse-engineered Traeger iOS app)
+        command = f"14,{target_temp}"
+        print(f"Setting probe alarm to {target_temp}°F (probe_id={probe_id} ignored)...")
         return self.send_command(command)
     
     def clear_probe_alarm(self, probe_id: int) -> Dict:
@@ -161,32 +162,31 @@ class TraegerClient:
         Clear a probe temperature alarm.
         
         Args:
-            probe_id: Probe number (0-3)
+            probe_id: Probe number (0-3) -- ignored; see set_probe_alarm.
             
         Returns:
             Response from the API
         """
-        # Set alarm to 0 to clear it
-        command = f"120,10,p{probe_id},0"
-        print(f"Clearing probe {probe_id} alarm...")
+        # Set probe alarm to 0 to clear it.
+        command = "14,0"
+        print(f"Clearing probe alarm (probe_id={probe_id} ignored)...")
         return self.send_command(command)
     
     def request_status(self, parse: bool = True) -> Dict:
         """
-        Request current grill status.
+        Ask the grill to publish its current status. The actual telemetry is
+        delivered asynchronously over MQTT (topic
+        ``prod/thing/update/<thingName>``); this REST call only nudges the
+        grill to publish a fresh update.
         
         Args:
-            parse: Whether to parse the status response (default: True)
+            parse: Ignored; kept for backwards compatibility.
             
         Returns:
-            Status data (parsed if parse=True, raw otherwise)
+            Raw REST response from the command endpoint (usually ``{}``).
         """
-        # Command "113" appears to request status
-        response = self.send_command("113")
-        
-        if parse:
-            return self.parse_status(response)
-        return response
+        # Command "90" requests a state push.
+        return self.send_command("90")
     
     def parse_status(self, status_response: Dict) -> Dict:
         """
@@ -245,20 +245,32 @@ class TraegerClient:
     
     def get_status_from_api(self) -> Dict:
         """
-        Get current grill status from the REST API (alternative to MQTT).
-        
+        Get current grill status from the REST API.
+
+        The Traeger mobile API exposes a single `/users/self` endpoint that
+        returns the user's grills (under the `things` key), with each grill's
+        latest reported state embedded in the same payload. We pick the entry
+        matching the active `grill_id`.
+
         Returns:
-            Current grill status
+            Current grill status (the matching `things` entry), or {} if not
+            found.
         """
         if not self.grill_id:
             raise ValueError("No grill ID set. Call set_grill() first.")
-        
+
         response = requests.get(
-            f"{self.base_url}/things/{self.grill_id}",
+            f"{self.base_url}/users/self",
             headers=self.headers
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        for thing in data.get('things', []) or []:
+            if thing.get('thingName') == self.grill_id:
+                return thing
+
+        return {}
     
     def get_mqtt_connection(self) -> Dict:
         """Get MQTT WebSocket connection details for real-time updates."""
@@ -269,6 +281,87 @@ class TraegerClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def start_mqtt_listener(self, on_status_callback=None, topics=None):
+        """
+        Open a long-lived MQTT WebSocket connection to AWS IoT and stream
+        status updates from the grill.
+
+        Every received message is JSON-decoded (when possible) and stored on
+        ``self.grill_status``. The optional ``on_status_callback(topic, payload)``
+        is invoked for each message.
+
+        Returns the underlying ``paho.mqtt.client.Client`` instance. Call
+        ``client.loop_stop(); client.disconnect()`` to tear it down.
+        """
+        # Imported lazily so the rest of the client works without paho-mqtt.
+        import paho.mqtt.client as mqtt
+        from urllib.parse import urlparse
+
+        if not self.grill_id:
+            raise ValueError("No grill ID set. Call set_grill() first.")
+
+        info = self.get_mqtt_connection()
+        signed_url = info['signedUrl']
+        parsed = urlparse(signed_url)
+        host = parsed.hostname
+        # paho's ws path must include the query string (SigV4 params).
+        ws_path = parsed.path + ('?' + parsed.query if parsed.query else '')
+
+        client_id = f"traeger-desktop-{self.grill_id}-{int(time.time())}"
+
+        # paho-mqtt 2.x requires choosing a callback API version.
+        if hasattr(mqtt, 'CallbackAPIVersion'):
+            mqttc = mqtt.Client(
+                client_id=client_id,
+                transport='websockets',
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            )
+        else:  # paho-mqtt 1.x fallback
+            mqttc = mqtt.Client(client_id=client_id, transport='websockets')
+
+        mqttc.ws_set_options(path=ws_path)
+        mqttc.tls_set()
+
+        if topics is None:
+            # Traeger publishes the grill's full status payload to
+            # ``prod/thing/update/<thingName>`` (this is the topic the iOS
+            # app subscribes to). The AWS IoT policy on the JWT only allows
+            # subscribing to this specific topic -- other variants are
+            # rejected and trigger an immediate broker-side disconnect.
+            topics = [f"prod/thing/update/{self.grill_id}"]
+
+        def _on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                print(f"[MQTT] connected to {host}, subscribing to {topics}")
+                for t in topics:
+                    client.subscribe(t, qos=0)
+            else:
+                print(f"[MQTT] connect failed rc={rc}")
+
+        def _on_disconnect(client, userdata, rc):
+            print(f"[MQTT] disconnected rc={rc}")
+
+        def _on_message(client, userdata, msg):
+            try:
+                payload = json.loads(msg.payload.decode('utf-8'))
+            except Exception:
+                payload = {'_raw': msg.payload[:500].decode('utf-8', errors='replace')}
+            payload['_topic'] = msg.topic
+            self.grill_status = payload
+            if on_status_callback:
+                try:
+                    on_status_callback(msg.topic, payload)
+                except Exception as cb_err:
+                    print(f"[MQTT] callback error: {cb_err}")
+
+        mqttc.on_connect = _on_connect
+        mqttc.on_disconnect = _on_disconnect
+        mqttc.on_message = _on_message
+
+        mqttc.connect(host, 443, keepalive=60)
+        mqttc.loop_start()
+        return mqttc
     
     def connect_mqtt(self, on_message_callback=None):
         """
